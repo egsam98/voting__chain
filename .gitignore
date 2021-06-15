@@ -1,2 +1,7 @@
 .idea/
 .env
+
+hyperledger_config/*
+!hyperledger_config/.keep
+
+wallet/

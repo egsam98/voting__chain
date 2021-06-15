@@ -8,6 +8,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/egsam98/voting/chain/services/hyperledger"
 )
 
 type ChainHandlerOption func(*ChainHandler)
@@ -24,14 +26,19 @@ func WithTopicDead(consumptionInterval time.Duration) ChainHandlerOption {
 type ChainHandler struct {
 	isTopicDead         bool
 	consumptionInterval time.Duration
+	hyperledger         *hyperledger.Hyperledger
 	producer            sarama.SyncProducer
 }
 
 func NewChainHandler(
+	hyperledger *hyperledger.Hyperledger,
 	producer sarama.SyncProducer,
 	options ...ChainHandlerOption,
 ) *ChainHandler {
-	h := &ChainHandler{producer: producer}
+	h := &ChainHandler{
+		hyperledger: hyperledger,
+		producer:    producer,
+	}
 
 	for _, option := range options {
 		option(h)

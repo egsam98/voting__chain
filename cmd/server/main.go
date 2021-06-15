@@ -16,19 +16,27 @@ import (
 	"github.com/rs/zerolog/pkgerrors"
 
 	"github.com/egsam98/voting/chain/handlers/amqp"
+	"github.com/egsam98/voting/chain/services/hyperledger"
 )
 
 var envs struct {
 	Kafka struct {
-		Addr  string `envconfig:"KAFKA_ADDR"`
+		Addr  string `envconfig:"KAFKA_ADDR" default:"localhost:9092"`
 		Topic struct {
-			IsDead bool   `envconfig:"KAFKA_TOPIC_IS_DEAD"`
-			Name   string `envconfig:"KAFKA_TOPIC_NAME"`
+			IsDead bool   `envconfig:"KAFKA_TOPIC_IS_DEAD" default:"false"`
+			Name   string `envconfig:"KAFKA_TOPIC_NAME" required:"true"`
 		}
 		Consumer struct {
 			GroupID             string        `envconfig:"KAFKA_CONSUMER_GROUP_ID" required:"true"`
 			ConsumptionInterval time.Duration `envconfig:"KAFKA_CONSUMER_CONSUMPTION_INTERVAL" default:"10s"`
 		}
+	}
+	Hyperledger struct {
+		Channel        string `envconfig:"HYPERLEDGER_CHANNEL" required:"true"`
+		MSPID          string `envconfig:"HYPERLEDGER_MSP_ID" required:"true"`
+		ConfigPath     string `envconfig:"HYPERLEDGER_CONFIG_PATH" required:"true"`
+		CertPath       string `envconfig:"HYPERLEDGER_CERT_PATH" required:"true"`
+		PrivateKeyPath string `envconfig:"HYPERLEDGER_PRIVATE_KEY_PATH" required:"true"`
 	}
 }
 
@@ -56,7 +64,18 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	closeConsumer, err := startConsumer(ctx)
+	ledger, err := hyperledger.NewHyperledger(hyperledger.Config{
+		Channel:        envs.Hyperledger.Channel,
+		ConfigPath:     envs.Hyperledger.ConfigPath,
+		MSPID:          envs.Hyperledger.MSPID,
+		CertPath:       envs.Hyperledger.CertPath,
+		PrivateKeyPath: envs.Hyperledger.PrivateKeyPath,
+	})
+	if err != nil {
+		return err
+	}
+
+	closeConsumer, err := startConsumer(ctx, ledger)
 	if err != nil {
 		return err
 	}
@@ -75,9 +94,10 @@ func run() error {
 }
 
 // startConsumer selects consumer with type based on "KAFKA_TOPIC_IS_DEAD" env value and starts listening
-func startConsumer(ctx context.Context) (func() error, error) {
+func startConsumer(ctx context.Context, ledger *hyperledger.Hyperledger) (func() error, error) {
 	cfg := sarama.NewConfig()
 	cfg.Producer.Return.Errors = true
+	cfg.Producer.Return.Successes = true
 	cfg.Consumer.Return.Errors = true
 	cfg.Consumer.Offsets.Initial = sarama.OffsetOldest
 
@@ -97,6 +117,7 @@ func startConsumer(ctx context.Context) (func() error, error) {
 	}
 
 	chainHandler := amqp.NewChainHandler(
+		ledger,
 		producer,
 		options...,
 	)
