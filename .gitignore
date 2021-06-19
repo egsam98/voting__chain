@@ -1,5 +1,6 @@
 .idea/
 .env
+vendor/
 
 hyperledger_config/*
 !hyperledger_config/.keep

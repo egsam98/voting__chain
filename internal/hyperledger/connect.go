@@ -10,23 +10,12 @@ import (
 
 const walletLabel = "app_user"
 
-type Hyperledger struct {
-	client *gateway.Network
-}
-
 type Config struct {
 	Channel, ConfigPath, MSPID, CertPath, PrivateKeyPath string
+	ChaincodeID                                          string
 }
 
-func NewHyperledger(cfg Config) (*Hyperledger, error) {
-	client, err := connect(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &Hyperledger{client: client}, nil
-}
-
-func connect(cfg Config) (*gateway.Network, error) {
+func Connect(cfg Config) (*gateway.Network, error) {
 	wallet, err := generateWallet(cfg.MSPID, cfg.CertPath, cfg.PrivateKeyPath)
 	if err != nil {
 		return nil, err

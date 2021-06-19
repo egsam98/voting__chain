@@ -16,7 +16,8 @@ import (
 	"github.com/rs/zerolog/pkgerrors"
 
 	"github.com/egsam98/voting/chain/handlers/amqp"
-	"github.com/egsam98/voting/chain/services/hyperledger"
+	"github.com/egsam98/voting/chain/internal/hyperledger"
+	"github.com/egsam98/voting/chain/services/smart"
 )
 
 var envs struct {
@@ -37,6 +38,7 @@ var envs struct {
 		ConfigPath     string `envconfig:"HYPERLEDGER_CONFIG_PATH" required:"true"`
 		CertPath       string `envconfig:"HYPERLEDGER_CERT_PATH" required:"true"`
 		PrivateKeyPath string `envconfig:"HYPERLEDGER_PRIVATE_KEY_PATH" required:"true"`
+		ChaincodeID    string `envconfig:"HYPERLEDGER_CHAINCODE_ID" default:"basic"`
 	}
 }
 
@@ -64,18 +66,21 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ledger, err := hyperledger.NewHyperledger(hyperledger.Config{
+	ledgerNet, err := hyperledger.Connect(hyperledger.Config{
 		Channel:        envs.Hyperledger.Channel,
 		ConfigPath:     envs.Hyperledger.ConfigPath,
 		MSPID:          envs.Hyperledger.MSPID,
 		CertPath:       envs.Hyperledger.CertPath,
 		PrivateKeyPath: envs.Hyperledger.PrivateKeyPath,
+		ChaincodeID:    envs.Hyperledger.ChaincodeID,
 	})
 	if err != nil {
 		return err
 	}
 
-	closeConsumer, err := startConsumer(ctx, ledger)
+	smartClient := smart.NewClient(ledgerNet.GetContract(envs.Hyperledger.ChaincodeID))
+
+	closeConsumer, err := startConsumer(ctx, smartClient)
 	if err != nil {
 		return err
 	}
@@ -94,7 +99,7 @@ func run() error {
 }
 
 // startConsumer selects consumer with type based on "KAFKA_TOPIC_IS_DEAD" env value and starts listening
-func startConsumer(ctx context.Context, ledger *hyperledger.Hyperledger) (func() error, error) {
+func startConsumer(ctx context.Context, client *smart.Client) (func() error, error) {
 	cfg := sarama.NewConfig()
 	cfg.Producer.Return.Errors = true
 	cfg.Producer.Return.Successes = true
@@ -117,7 +122,7 @@ func startConsumer(ctx context.Context, ledger *hyperledger.Hyperledger) (func()
 	}
 
 	chainHandler := amqp.NewChainHandler(
-		ledger,
+		client,
 		producer,
 		options...,
 	)

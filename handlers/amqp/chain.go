@@ -9,7 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/egsam98/voting/chain/services/hyperledger"
+	"github.com/egsam98/voting/chain/services/smart"
 )
 
 type ChainHandlerOption func(*ChainHandler)
@@ -26,18 +26,18 @@ func WithTopicDead(consumptionInterval time.Duration) ChainHandlerOption {
 type ChainHandler struct {
 	isTopicDead         bool
 	consumptionInterval time.Duration
-	hyperledger         *hyperledger.Hyperledger
+	client              *smart.Client
 	producer            sarama.SyncProducer
 }
 
 func NewChainHandler(
-	hyperledger *hyperledger.Hyperledger,
+	client *smart.Client,
 	producer sarama.SyncProducer,
 	options ...ChainHandlerOption,
 ) *ChainHandler {
 	h := &ChainHandler{
-		hyperledger: hyperledger,
-		producer:    producer,
+		client:   client,
+		producer: producer,
 	}
 
 	for _, option := range options {
@@ -61,23 +61,23 @@ func (c *ChainHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim s
 			Interface("vote", vote).
 			Msg("handlers.amqp: Received message")
 
-		//if err := c.service.Run(session.Context(), vote); err != nil {
-		//	if c.isTopicDead {
-		//		time.Sleep(c.consumptionInterval)
-		//		return err
-		//	}
-		//
-		//	topicDead := msg.Topic + ".dead"
-		//	if _, _, err := c.producer.SendMessage(&sarama.ProducerMessage{
-		//		Topic: topicDead,
-		//		Value: sarama.ByteEncoder(msg.Value),
-		//	}); err != nil {
-		//		return errors.Wrapf(err, "failed to send message to topic %q", topicDead)
-		//	}
-		//
-		//	log.Error().Stack().Err(err).Msg("handlers.amqp: Vote handling error")
-		//	return nil
-		//}
+		if err := c.client.RegisterVote(vote); err != nil {
+			if c.isTopicDead {
+				time.Sleep(c.consumptionInterval)
+				return err
+			}
+
+			topicDead := msg.Topic + ".dead"
+			if _, _, err := c.producer.SendMessage(&sarama.ProducerMessage{
+				Topic: topicDead,
+				Value: sarama.ByteEncoder(msg.Value),
+			}); err != nil {
+				return errors.Wrapf(err, "failed to send message to topic %q", topicDead)
+			}
+
+			log.Error().Stack().Err(err).Msg("handlers.amqp: Vote handling error")
+			return nil
+		}
 
 		if c.isTopicDead {
 			time.Sleep(c.consumptionInterval)
