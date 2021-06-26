@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,12 +16,17 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
 
-	"github.com/egsam98/voting/chain/handlers/amqp"
+	"github.com/egsam98/voting/chain/cmd/server/handlers/amqp"
+	"github.com/egsam98/voting/chain/cmd/server/handlers/rest"
 	"github.com/egsam98/voting/chain/internal/hyperledger"
 	"github.com/egsam98/voting/chain/services/smart"
 )
 
 var envs struct {
+	Web struct {
+		Addr            string        `envconfig:"WEB_ADDR" default:":3000"`
+		ShutdownTimeout time.Duration `envconfig:"WEB_SHUTDOWN_TIMEOUT" default:"5s"`
+	}
 	Kafka struct {
 		Addr  string `envconfig:"KAFKA_ADDR" default:"localhost:9092"`
 		Topic struct {
@@ -63,6 +69,46 @@ func run() error {
 		Interface("envs", envs).
 		Msg("main: ENVs")
 
+	cfg := sarama.NewConfig()
+	cfg.Producer.Return.Errors = true
+	cfg.Producer.Return.Successes = true
+	cfg.Consumer.Return.Errors = true
+	cfg.Consumer.Offsets.Initial = sarama.OffsetOldest
+
+	kafkaClient, err := sarama.NewClient([]string{envs.Kafka.Addr}, cfg)
+	if err != nil {
+		return errors.Wrap(err, "failed to connect to Kafka broker")
+	}
+
+	saramaAdmin, err := sarama.NewClusterAdminFromClient(kafkaClient)
+	if err != nil {
+		return errors.Wrap(err, "failed to init Kafka admin")
+	}
+
+	consumerGroup, err := sarama.NewConsumerGroupFromClient(envs.Kafka.Consumer.GroupID, kafkaClient)
+	if err != nil {
+		return errors.Wrapf(err, "failed to init Kafka consumer group %q", envs.Kafka.Consumer.GroupID)
+	}
+
+	defer func() {
+		log.Info().Msgf("main: Closing Kafka consumer group %q", envs.Kafka.Consumer.GroupID)
+		if err := consumerGroup.Close(); err != nil {
+			log.Error().Stack().Err(err).Msg("main: Failed to close Kafka consumer group")
+		}
+	}()
+
+	producer, err := sarama.NewSyncProducerFromClient(kafkaClient)
+	if err != nil {
+		return errors.Wrap(err, "failed to init Kafka producer")
+	}
+
+	defer func() {
+		log.Info().Msg("main: Closing Kafka producer")
+		if err := producer.Close(); err != nil {
+			log.Error().Stack().Err(err).Msg("main: Failed to close Kafka producer")
+		}
+	}()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -80,57 +126,16 @@ func run() error {
 
 	smartClient := smart.NewClient(ledgerNet.GetContract(envs.Hyperledger.ChaincodeID))
 
-	closeConsumer, err := startConsumer(ctx, smartClient)
-	if err != nil {
-		return err
-	}
-
-	sigint := make(chan os.Signal, 1)
-	signal.Notify(sigint, syscall.SIGINT)
-
-	sig := <-sigint
-	log.Info().Msgf("main: Waiting consumer group %q to complete", envs.Kafka.Consumer.GroupID)
-	cancel()
-	if err := closeConsumer(); err != nil {
-		return err
-	}
-	log.Info().Msgf("main: Terminated via signal %q", sig)
-	return nil
-}
-
-// startConsumer selects consumer with type based on "KAFKA_TOPIC_IS_DEAD" env value and starts listening
-func startConsumer(ctx context.Context, client *smart.Client) (func() error, error) {
-	cfg := sarama.NewConfig()
-	cfg.Producer.Return.Errors = true
-	cfg.Producer.Return.Successes = true
-	cfg.Consumer.Return.Errors = true
-	cfg.Consumer.Offsets.Initial = sarama.OffsetOldest
-
-	kafkaClient, err := sarama.NewClient([]string{envs.Kafka.Addr}, cfg)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to connect to Kafka broker")
-	}
-
-	producer, err := sarama.NewSyncProducerFromClient(kafkaClient)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to init Kafka producer")
-	}
-
 	var options []amqp.ChainHandlerOption
 	if envs.Kafka.Topic.IsDead {
 		options = append(options, amqp.WithTopicDead(envs.Kafka.Consumer.ConsumptionInterval))
 	}
 
 	chainHandler := amqp.NewChainHandler(
-		client,
+		smartClient,
 		producer,
 		options...,
 	)
-
-	consumerGroup, err := sarama.NewConsumerGroupFromClient(envs.Kafka.Consumer.GroupID, kafkaClient)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to init Kafka consumer group %q", envs.Kafka.Consumer.GroupID)
-	}
 
 	go func() {
 		for err := range consumerGroup.Errors() {
@@ -150,7 +155,7 @@ func startConsumer(ctx context.Context, client *smart.Client) (func() error, err
 				ctx,
 				[]string{envs.Kafka.Topic.Name},
 				chainHandler,
-			); err != nil {
+			); err != nil && !errors.Is(err, sarama.ErrClosedConsumerGroup) {
 				log.Fatal().Err(err).Msgf("main: Failed to consume from topic=%s", envs.Kafka.Topic.Name)
 			}
 
@@ -160,13 +165,37 @@ func startConsumer(ctx context.Context, client *smart.Client) (func() error, err
 		}
 	}()
 
-	return func() error {
-		if err := producer.Close(); err != nil {
-			return errors.Wrap(err, "failed to close Kafka producer")
+	srv := &http.Server{
+		Addr:    envs.Web.Addr,
+		Handler: rest.API(saramaAdmin, producer),
+	}
+
+	apiErr := make(chan error)
+	go func() {
+		log.Info().Msgf("main: Listening Chain service on %q", envs.Web.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			apiErr <- err
 		}
-		if err := consumerGroup.Close(); err != nil {
-			return errors.Wrapf(err, "failed to close consumer group %q", envs.Kafka.Consumer.GroupID)
+	}()
+
+	sigint := make(chan os.Signal, 1)
+	signal.Notify(sigint, syscall.SIGINT)
+
+	select {
+	case err := <-apiErr:
+		return errors.WithStack(err)
+	case sig := <-sigint:
+		log.Info().Msgf("main: Received signal %q", sig)
+
+		ctx, cancel := context.WithTimeout(context.Background(), envs.Web.ShutdownTimeout)
+		defer cancel()
+
+		log.Info().Msg("main: Doing server shutdown")
+		if err := srv.Shutdown(ctx); err != nil {
+			_ = srv.Close()
+			return errors.Wrap(err, "failed to shutdown HTTP server")
 		}
-		return nil
-	}, nil
+	}
+
+	return nil
 }
