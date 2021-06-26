@@ -8,7 +8,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const funcRegisterVote = "RegisterVote"
+const (
+	funcRegisterVote = "RegisterVote"
+	funcFindVote     = "FindVote"
+)
 
 type Contract struct {
 	contractapi.Contract
@@ -33,4 +36,10 @@ func (*Contract) RegisterVote(ctx contractapi.TransactionContextInterface, voteP
 	}
 
 	return ctx.GetStub().PutState(key, votePb)
+}
+
+func (*Contract) FindVote(ctx contractapi.TransactionContextInterface, voterPassport string) (string, error) {
+	key := "vote_" + voterPassport
+	b, err := ctx.GetStub().GetState(key)
+	return string(b), err
 }

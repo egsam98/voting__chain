@@ -166,8 +166,12 @@ func run() error {
 	}()
 
 	srv := &http.Server{
-		Addr:    envs.Web.Addr,
-		Handler: rest.API(saramaAdmin, producer),
+		Addr: envs.Web.Addr,
+		Handler: rest.API(
+			saramaAdmin,
+			producer,
+			smartClient,
+		),
 	}
 
 	apiErr := make(chan error)

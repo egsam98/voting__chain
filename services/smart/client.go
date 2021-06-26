@@ -46,3 +46,18 @@ func (c *Client) RegisterVote(vote *votingpb.Vote) error {
 
 	return errors.Wrapf(err, "failed to invoke %q", funcRegisterVote)
 }
+
+func (c *Client) FindVote(voterPassport string) (*votingpb.Vote, error) {
+	b, err := c.contract.EvaluateTransaction(funcFindVote, voterPassport)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to invoke %q", funcFindVote)
+	}
+
+	if b == nil {
+		return nil, errors.WithStack(ErrVoteNotFound)
+	}
+
+	vote := &votingpb.Vote{}
+	err = proto.Unmarshal(b, vote)
+	return vote, errors.Wrapf(err, "failed to unmarshal protobuf to %T", vote)
+}
