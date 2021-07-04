@@ -25,7 +25,7 @@ func (*Contract) RegisterVote(ctx contractapi.TransactionContextInterface, voteP
 		return err
 	}
 
-	key := "vote_" + vote.Voter.GetPassport()
+	key := getVoteKey(vote.CandidateId, vote.Voter.GetPassport())
 
 	b, err := ctx.GetStub().GetState(key)
 	if err != nil {
@@ -38,8 +38,8 @@ func (*Contract) RegisterVote(ctx contractapi.TransactionContextInterface, voteP
 	return ctx.GetStub().PutState(key, votePb)
 }
 
-func (*Contract) FindVote(ctx contractapi.TransactionContextInterface, voterPassport string) (string, error) {
-	key := "vote_" + voterPassport
+func (*Contract) FindVote(ctx contractapi.TransactionContextInterface, candidateID int64, voterPassport string) (string, error) {
+	key := getVoteKey(candidateID, voterPassport)
 	b, err := ctx.GetStub().GetState(key)
 	return string(b), err
 }

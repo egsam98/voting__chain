@@ -9,8 +9,12 @@ import (
 var ErrInvalidVote = errors.New("vote is invalid")
 
 var (
-	ErrVoteNotFound = &web.ClientError{
+	ErrInvalidInput = &web.ClientError{
 		Code: 1,
+		Err:  "invalid input",
+	}
+	ErrVoteNotFound = &web.ClientError{
+		Code: 2,
 		Err:  "vote is not found",
 	}
 )

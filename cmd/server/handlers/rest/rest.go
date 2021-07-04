@@ -33,7 +33,7 @@ func API(
 
 	api := chi.NewRouter()
 	mux.Mount("/api", api)
-	api.Get("/vote/{passport}", vc.FindVoteByVoterPassport)
+	api.Get("/candidate/{candidate_id}/vote/{passport}", vc.FindVoteByVoterPassport)
 
 	return mux
 }

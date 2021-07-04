@@ -1,8 +1,6 @@
 package web
 
 import (
-	"fmt"
-
 	"github.com/pkg/errors"
 )
 
@@ -12,7 +10,7 @@ type ClientError struct {
 }
 
 func (c *ClientError) Error() string {
-	return fmt.Sprintf("%s (%d)", c.Err, c.Code)
+	return c.Err
 }
 
 func WrapWithError(clientErr *ClientError, err error) error {

@@ -2,6 +2,7 @@ package rest
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
@@ -19,9 +20,15 @@ func newVoteController(client *smart.Client) *voteController {
 }
 
 func (vc *voteController) FindVoteByVoterPassport(w http.ResponseWriter, r *http.Request) {
+	candidateID, err := strconv.ParseInt(chi.URLParam(r, "candidate_id"), 10, 64)
+	if err != nil {
+		web.RespondError(w, r, web.WrapWithError(smart.ErrInvalidInput, err))
+		return
+	}
+
 	passport := chi.URLParam(r, "passport")
 
-	vote, err := vc.client.FindVote(passport)
+	vote, err := vc.client.FindVote(candidateID, passport)
 	if err != nil {
 		web.RespondError(w, r, err)
 		return
