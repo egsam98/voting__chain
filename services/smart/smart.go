@@ -1,8 +1,6 @@
 package smart
 
 import (
-	"errors"
-
 	votingpb "github.com/egsam98/voting/proto"
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 	"google.golang.org/protobuf/proto"
@@ -31,8 +29,15 @@ func (*Contract) RegisterVote(ctx contractapi.TransactionContextInterface, voteP
 	if err != nil {
 		return err
 	}
+
 	if b != nil {
-		return errors.New("vote by user with this passport already exists")
+		vote.Status = votingpb.Vote_FAIL
+		reason := "vote by user with this passport already exists"
+		vote.FailReason = &reason
+
+		if votePb, err = proto.Marshal(vote); err != nil {
+			return err
+		}
 	}
 
 	return ctx.GetStub().PutState(key, votePb)

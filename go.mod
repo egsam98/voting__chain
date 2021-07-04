@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/Shopify/sarama v1.29.0
-	github.com/egsam98/voting/proto v0.2.0
+	github.com/egsam98/voting/proto v0.2.1-0.20210704193943-52015c4dbb31
 	github.com/go-chi/chi/v5 v5.0.3
 	github.com/go-chi/render v1.0.1
 	github.com/hyperledger/fabric-contract-api-go v1.1.1
@@ -16,4 +16,4 @@ require (
 	google.golang.org/protobuf v1.26.0
 )
 
-replace github.com/egsam98/voting/proto => github.com/egsam98/voting__proto v0.2.0
+replace github.com/egsam98/voting/proto => github.com/egsam98/voting__proto v0.2.1-0.20210704193943-52015c4dbb31
