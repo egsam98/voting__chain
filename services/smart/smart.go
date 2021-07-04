@@ -33,6 +33,9 @@ func (*Contract) RegisterVote(ctx contractapi.TransactionContextInterface, voteP
 	if b != nil {
 		vote.Status = votingpb.Vote_FAIL
 		reason := "vote by user with this passport already exists"
+		if vote.FailReason != nil {
+			reason = *vote.FailReason + "; " + reason
+		}
 		vote.FailReason = &reason
 
 		if votePb, err = proto.Marshal(vote); err != nil {
